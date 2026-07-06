@@ -283,26 +283,30 @@ private:
         return type.mOptionalLike ? type.mText + " | undefined" : type.mText;
     }
 
-    template <class T, auto F> [[nodiscard]] static consteval auto callableArgsProbe() {
+    template <class T, class FT> [[nodiscard]] static consteval auto callableArgsProbe() {
         if constexpr (std::is_void_v<T>) {
-            return std::type_identity<typename FnTraitsOf<F>::ArgsTuple>{};
+            return std::type_identity<typename FnTraitsOfType<FT>::ArgsTuple>{};
         } else {
-            return std::type_identity<MethodArgsOf<F, T>>{};
+            return std::type_identity<MethodArgsOfType<FT, T>>{};
         }
     }
 
+    // Signatures are derived from the callable TYPES (decltype(Desc::callables)),
+    // never from the pointer VALUES -- so generating a .d.ts never odr-uses the
+    // bound functions and needs none of their definitions at link time.
     template <class T, class Desc>
     void emitCallableLines(const Desc& desc, int indent, const std::string& prefix,
                            const std::string& nameSuffix) {
         emitDescJsDoc(desc, indent);
+        using Callables = std::remove_cvref_t<decltype(Desc::callables)>;
         [&]<std::size_t... Js>(std::index_sequence<Js...>) {
             (
                 [&] {
-                    constexpr auto F = std::get<Js>(Desc::callables);
-                    using Args = decltype(callableArgsProbe<T, F>())::type;
+                    using FT   = std::tuple_element_t<Js, Callables>;
+                    using Args = decltype(callableArgsProbe<T, FT>())::type;
                     line(indent, prefix + std::string(Desc::name) + nameSuffix +
                                      signatureOf<Args>(desc) + ": " +
-                                     returnTypeOf<typename FnTraitsOf<F>::Ret>(desc) + ";");
+                                     returnTypeOf<typename FnTraitsOfType<FT>::Ret>(desc) + ";");
                 }(),
                 ...);
         }(std::make_index_sequence<Desc::overloadCount>{});
@@ -357,12 +361,15 @@ private:
         if (const std::string_view override = desc.tsTypeOverride(); !override.empty()) {
             type = std::string(override);
         } else {
-            constexpr auto A0 = std::get<0>(Desc::accessors);
+            // Property type from the accessor TYPE (decltype(Desc::accessors)),
+            // not the pointer value -- keeps .d.ts generation odr-use free even
+            // for getter/setter methods.
+            using A0 = std::tuple_element_t<0, std::remove_cvref_t<decltype(Desc::accessors)>>;
             if constexpr (Desc::isField) {
-                const TsType t = tsNameOf<std::remove_cvref_t<FieldTypeOf<A0>>>(mRegistry);
+                const TsType t = tsNameOf<std::remove_cvref_t<FieldTypeOfType<A0>>>(mRegistry);
                 type = t.mOptionalLike ? t.mText + " | undefined" : t.mText;
             } else {
-                using Ret = FnTraitsOf<A0>::Ret;
+                using Ret = FnTraitsOfType<A0>::Ret;
                 const TsType t = tsNameOf<std::remove_cvref_t<Ret>>(mRegistry);
                 type = t.mOptionalLike ? t.mText + " | undefined" : t.mText;
             }

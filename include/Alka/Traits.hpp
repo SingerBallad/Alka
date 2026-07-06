@@ -59,9 +59,11 @@ template<class F>
 concept StatelessCallable =
     std::is_class_v<F> && std::is_empty_v<F> && requires { &F::operator(); };
 
-template<auto F>
-[[nodiscard]] consteval auto fnTraitsProbe() {
-    using D = decltype(F);
+// Type-based core: decompose a callable purely from its type. This never
+// odr-uses the callable, so the signature-only paths (e.g. TypeScript
+// generation) work without linking the bound functions' definitions.
+template<class D>
+[[nodiscard]] consteval auto fnTraitsProbeType() {
     if constexpr (std::is_member_function_pointer_v<D>) {
         return FnTraits<D>{};
     } else if constexpr (std::is_pointer_v<D> && std::is_function_v<std::remove_pointer_t<D>>) {
@@ -75,10 +77,19 @@ template<auto F>
     }
 }
 
+template<auto F>
+[[nodiscard]] consteval auto fnTraitsProbe() {
+    return fnTraitsProbeType<decltype(F)>();
+}
+
 }  // namespace Detail
 
+// Traits of anything bindable as a callable value (odr-uses nothing itself).
+template<class D>
+using FnTraitsOfType = decltype(Detail::fnTraitsProbeType<D>());
+
 template<auto F>
-using FnTraitsOf = decltype(Detail::fnTraitsProbe<F>());
+using FnTraitsOf = FnTraitsOfType<decltype(F)>;
 
 template<auto F>
 inline constexpr bool isMemberCallable = std::is_member_function_pointer_v<decltype(F)>;

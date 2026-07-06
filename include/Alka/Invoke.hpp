@@ -510,9 +510,12 @@ decltype(auto) callStoredOnSelf(T* self, StoredTuple& stored, std::index_sequenc
     }
 }
 
-template <auto F, class T> [[nodiscard]] consteval auto methodArgsProbe() {
-    using Traits = FnTraitsOf<F>;
-    if constexpr (std::is_member_function_pointer_v<decltype(F)>) {
+// JS-visible argument list from a callable TYPE (member-pointer args, or a
+// self-taking callable's tail). Type-based so signature-only paths never
+// odr-use the callable.
+template <class FT, class T> [[nodiscard]] consteval auto methodArgsProbeType() {
+    using Traits = FnTraitsOfType<FT>;
+    if constexpr (std::is_member_function_pointer_v<FT>) {
         static_assert(std::is_base_of_v<typename Traits::Class, T>,
                       "Alka: this member function belongs to an unrelated class");
         return std::type_identity<typename Traits::ArgsTuple>{};
@@ -528,7 +531,13 @@ template <auto F, class T> [[nodiscard]] consteval auto methodArgsProbe() {
     }
 }
 
-template <auto F, class T> using MethodArgsOf = decltype(methodArgsProbe<F, T>())::type;
+template <class FT, class T> using MethodArgsOfType = typename decltype(methodArgsProbeType<FT, T>())::type;
+
+template <auto F, class T> [[nodiscard]] consteval auto methodArgsProbe() {
+    return methodArgsProbeType<decltype(F), T>();
+}
+
+template <auto F, class T> using MethodArgsOf = MethodArgsOfType<decltype(F), T>;
 
 template <class T, auto F, class Desc>
 void invokeMethod(T* self, const v8::FunctionCallbackInfo<v8::Value>& info, const CallSite& site,
@@ -611,6 +620,15 @@ template <class C, class M> auto memberTypeProbe(M C::*) -> M;
 
 template <auto Field> using FieldClassOf = decltype(memberClassProbe(Field));
 template <auto Field> using FieldTypeOf = decltype(memberTypeProbe(Field));
+
+// Type-based field decomposition (no odr-use), for signature-only paths.
+template <class P> struct MemberObjectPtrTraits;
+template <class C, class M> struct MemberObjectPtrTraits<M C::*> {
+    using Class = C;
+    using Type  = M;
+};
+template <class P> using FieldClassOfType = typename MemberObjectPtrTraits<P>::Class;
+template <class P> using FieldTypeOfType  = typename MemberObjectPtrTraits<P>::Type;
 
 template <class T, auto Field>
 void fieldGetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
