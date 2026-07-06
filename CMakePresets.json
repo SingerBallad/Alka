@@ -1,0 +1,69 @@
+{
+  "version": 8,
+  "cmakeMinimumRequired": { "major": 3, "minor": 28, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "description": "BYO V8: pass -DALKA_V8_TARGET=<target> (and, for tests/DemoHost, a libplatform-carrying V8 dev target); optionally -DALKA_V8_RUNTIME_DIR=<dir>. Configure FATAL-errors without ALKA_V8_TARGET.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "ALKA_BUILD_TESTS": "ON",
+        "ALKA_BUILD_EXAMPLES": "ON"
+      }
+    },
+    {
+      "name": "msvc-debug",
+      "displayName": "MSVC Debug",
+      "inherits": "base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "CMAKE_CXX_COMPILER": "cl" }
+    },
+    {
+      "name": "msvc-release",
+      "displayName": "MSVC Release",
+      "inherits": "base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "CMAKE_CXX_COMPILER": "cl" }
+    },
+    {
+      "name": "msvc-relwithdebinfo",
+      "displayName": "MSVC RelWithDebInfo",
+      "inherits": "base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo", "CMAKE_CXX_COMPILER": "cl" }
+    },
+    {
+      "name": "clang-cl-debug",
+      "displayName": "clang-cl Debug",
+      "inherits": "base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "CMAKE_CXX_COMPILER": "clang-cl" }
+    }
+  ],
+  "buildPresets": [
+    { "name": "msvc-debug", "configurePreset": "msvc-debug" },
+    { "name": "msvc-release", "configurePreset": "msvc-release" },
+    { "name": "msvc-relwithdebinfo", "configurePreset": "msvc-relwithdebinfo" },
+    { "name": "clang-cl-debug", "configurePreset": "clang-cl-debug" }
+  ],
+  "testPresets": [
+    {
+      "name": "msvc-debug",
+      "configurePreset": "msvc-debug",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "msvc-release",
+      "configurePreset": "msvc-release",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "msvc-relwithdebinfo",
+      "configurePreset": "msvc-relwithdebinfo",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "clang-cl-debug",
+      "configurePreset": "clang-cl-debug",
+      "output": { "outputOnFailure": true }
+    }
+  ]
+}

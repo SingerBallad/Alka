@@ -1,0 +1,12 @@
+build/
+out/
+.vs/
+.vscode/
+.idea/
+.cache/
+cmake-build-*/
+third_party/v8/
+CMakeUserPresets.json
+*.user
+
+tests/Golden/*.actual.d.ts
