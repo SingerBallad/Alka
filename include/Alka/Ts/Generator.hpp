@@ -121,7 +121,7 @@ public:
                 using T = Desc::Type;
                 mRegistry.add(typeid(T), path, std::string(boundNameOf<T>()));
             } else if constexpr (Desc::kind == MemberKind::EnumType) {
-                mRegistry.add(typeid(Desc::Type), path, std::string(Desc::name));
+                mRegistry.add(typeid(typename Desc::Type), path, std::string(Desc::name));
             } else if constexpr (Desc::kind == MemberKind::Submodule) {
                 collectModule<typename Desc::Module>();
             }

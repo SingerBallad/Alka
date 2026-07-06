@@ -55,7 +55,7 @@ struct PerIsolateData {
 [[nodiscard]] auto perIsolateData(v8::Isolate* isolate) -> PerIsolateData&;
 [[nodiscard]] auto perContextData(v8::Local<v8::Context> context) -> PerContextData&;
 
-[[nodiscard]] auto findCachedWrapper(ConvertCtx& cx, const TypeNode* node, const void* key)
+[[nodiscard]] auto findCachedWrapper(ConvertCtx& cx, const TypeNode* node, void* key)
     -> v8::Local<v8::Object>;
 
 
@@ -219,7 +219,7 @@ void installStaticMember(v8::Isolate* isolate, const v8::Local<v8::FunctionTempl
 
 template<class E, class Desc>
 void installEnum(v8::Local<v8::Context> context, const v8::Local<v8::Object> ns, const Desc&) {
-    const auto isolate = context->GetIsolate();
+    const auto isolate = v8::Isolate::GetCurrent();
     v8::HandleScope scope(isolate);
     const auto object = v8::Object::New(isolate);
     constexpr auto attributes =
@@ -332,7 +332,7 @@ auto classTemplateOf(v8::Isolate* isolate) -> v8::Local<v8::FunctionTemplate> {
 
 template<BoundClass T>
 [[nodiscard]] auto classFunctionOf(v8::Local<v8::Context> context) -> v8::Local<v8::Function> {
-    const auto isolate = context->GetIsolate();
+    const auto isolate = v8::Isolate::GetCurrent();
     const v8::Local<v8::Function> fn = classTemplateOf<T>(isolate)->GetFunction(context).ToLocalChecked();
     if constexpr (!std::is_void_v<ExtendsOf<T>>) {
         fn->SetPrototypeV2(context, classFunctionOf<ExtendsOf<T>>(context)).Check();
@@ -360,7 +360,7 @@ void installClass(v8::Local<v8::Context> context, v8::Local<v8::Object> ns) {
 template<class Mod, class Desc>
 void installFreeFunction(const v8::Local<v8::Context> context, v8::Local<v8::Object> ns,
                          const Desc& desc) {
-    const auto isolate = context->GetIsolate();
+    const auto isolate = v8::Isolate::GetCurrent();
     static const CallSite site = makeCallSite(modulePathOf<Mod>(), desc);
     v8::FunctionCallback callback;
     if constexpr (Desc::overloadCount == 1) {
@@ -376,7 +376,7 @@ void installFreeFunction(const v8::Local<v8::Context> context, v8::Local<v8::Obj
 
 template<BoundModule Mod>
 void installModule(v8::Local<v8::Context> context) {
-    const auto isolate = context->GetIsolate();
+    const auto isolate = v8::Isolate::GetCurrent();
     v8::HandleScope handleScope(isolate);
     v8::Local<v8::Object> ns = ensureNamespace(context, modulePathOf<Mod>());
     ConvertCtx cx{isolate, context};
@@ -405,6 +405,18 @@ void installModule(v8::Local<v8::Context> context) {
 template<BoundModule... Mods>
 void install(v8::Local<v8::Context> context, const InstallOptions& = {}) {
     (Detail::installModule<Mods>(context), ...);
+}
+
+// Registers a bound class's FunctionTemplate in the isolate WITHOUT installing
+// it into any namespace. Use this when the host drives its own object graph and
+// mints instances of T from C++ (Alka::toJs(cx, ptr) / Converter<T*|T|
+// shared_ptr<T>>) instead of exposing T as a constructor via install<Module>.
+// wrapNative() requires the template to be registered first; this is the
+// public, namespace-free way to do that. Idempotent per isolate; also registers
+// any bound base classes on T's inheritance chain.
+template<BoundClass... Ts>
+void registerClass(v8::Isolate* isolate) {
+    (static_cast<void>(Detail::classTemplateOf<Ts>(isolate)), ...);
 }
 
 }  // namespace Alka

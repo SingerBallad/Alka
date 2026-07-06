@@ -80,15 +80,17 @@ const TypeNode* lookupTypeNodeByTypeId(const std::type_info& id) {
 }
 
 auto perContextData(const v8::Local<v8::Context> context) -> PerContextData& {
+    // V8 14.x removed Context::GetIsolate() and requires an isolate for the
+    // embedder-data accessors; the isolate is always entered on this thread here.
+    const auto isolate = v8::Isolate::GetCurrent();
     if (static_cast<std::uint32_t>(ALKA_CONTEXT_EMBEDDER_SLOT) <
         context->GetNumberOfEmbedderDataFields()) {
         if (const auto existing =
-                context->GetAlignedPointerFromEmbedderData(ALKA_CONTEXT_EMBEDDER_SLOT);
+                context->GetAlignedPointerFromEmbedderData(isolate, ALKA_CONTEXT_EMBEDDER_SLOT);
             existing != nullptr) {
             return *static_cast<PerContextData*>(existing);
         }
     }
-    const auto isolate = context->GetIsolate();
     auto& data = perIsolateData(isolate);
     auto owned = std::make_unique<PerContextData>();
     const auto pcd = owned.get();
@@ -156,7 +158,7 @@ auto findCachedWrapper(ConvertCtx& cx, const TypeNode* node, void* key)
 
 void attachWrapper(const v8::Local<v8::Context> context, const v8::Local<v8::Object> target,
                    const TypeNode* node, Holder* holder, void* cacheKey) {
-    const auto isolate = context->GetIsolate();
+    const auto isolate = v8::Isolate::GetCurrent();
     target->SetAlignedPointerInInternalField(kNodeField,
                                              const_cast<void*>(static_cast<const void*>(node)));
     target->SetAlignedPointerInInternalField(kHolderField, holder);
@@ -195,7 +197,7 @@ auto internedString(v8::Isolate* isolate, const std::string_view text) -> v8::Lo
 
 auto ensureNamespace(const v8::Local<v8::Context> context, const std::string_view dottedPath)
     -> v8::Local<v8::Object> {
-    const auto isolate = context->GetIsolate();
+    const auto isolate = v8::Isolate::GetCurrent();
     v8::EscapableHandleScope scope(isolate);
     auto current = context->Global();
 
@@ -229,7 +231,7 @@ auto ensureNamespace(const v8::Local<v8::Context> context, const std::string_vie
 auto defineNamespaceValue(const v8::Local<v8::Context> context, const v8::Local<v8::Object> target,
                           const std::string_view name, const v8::Local<v8::Value> value, bool isReadonly)
     -> void {
-    const auto isolate = context->GetIsolate();
+    const auto isolate = v8::Isolate::GetCurrent();
     v8::HandleScope scope(isolate);
     const auto attributes = isReadonly
                                 ? static_cast<v8::PropertyAttribute>(v8::ReadOnly | v8::DontDelete)
