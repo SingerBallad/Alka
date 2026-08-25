@@ -14,13 +14,6 @@ namespace {
 
 struct HostMod;
 
-// Bound as a free function, NOT a lambda, on purpose. clang 22 (standalone
-// LLVM; the VS-bundled clang 20 is fine) miscompiles a consteval std::format /
-// std::print format-string check when it sits inside a lambda that Alka
-// instantiates through its NTTP call machinery: it emits an unresolved
-// reference to the MSVC STL consteval helper _Compile_time_parse_format_specs.
-// Binding a free/member function (or using std::vformat) sidesteps it. Plain
-// std::print in ordinary functions -- like the CLI helpers below -- is fine.
 void hostPrint(const std::string& text) { std::println("{}", text); }
 
 }  // namespace

@@ -1,8 +1,4 @@
 #pragma once
-
-// Showcase bindings for the demo host: both declaration forms, inheritance,
-// enums, defaults, metadata -- everything the generated game.d.ts reflects.
-
 #include <Alka/Alka.hpp>
 
 #include <cmath>
@@ -12,7 +8,6 @@
 
 namespace Demo {
 
-// --- in-class form: the binding lives inside the type -------------------------
 struct Vec2 {
     Vec2() = default;
     Vec2(double x, double y) : mX(x), mY(y) {}
@@ -24,7 +19,6 @@ struct Vec2 {
         Alka::prop<&Vec2::mX>(), Alka::prop<&Vec2::mY>());
 };
 
-// --- plain C++ classes, bound non-intrusively below ---------------------------
 struct Entity {
     explicit Entity(std::string name) : mName(std::move(name)) {}
     virtual ~Entity() = default;
