@@ -9,4 +9,4 @@ third_party/v8/
 CMakeUserPresets.json
 *.user
 
-tests/Golden/*.actual.d.ts
+tests/Ts/Golden/*.actual.d.ts

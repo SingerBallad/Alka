@@ -1,0 +1,25 @@
+@PACKAGE_INIT@
+
+include("${CMAKE_CURRENT_LIST_DIR}/AlkaTarget.cmake")
+
+if(NOT TARGET Alka::Alka)
+  if(NOT ALKA_V8_TARGET OR NOT TARGET "${ALKA_V8_TARGET}")
+    set(Alka_FOUND FALSE)
+    set(Alka_NOT_FOUND_MESSAGE
+        "Alka compiles against your V8: set ALKA_V8_TARGET to a target carrying V8's headers, "
+        "ABI definitions and libraries (defined before find_package(Alka))")
+    return()
+  endif()
+  set(_alka_engine "")
+  if(ALKA_WITH_ENGINE)
+    set(_alka_engine ENGINE)
+  endif()
+  alka_add_library(
+    INCLUDE_DIR "@PACKAGE_CMAKE_INSTALL_INCLUDEDIR@"
+    SOURCE_DIR "@PACKAGE_ALKA_INSTALL_SOURCEDIR@"
+    V8 "${ALKA_V8_TARGET}"
+    ${_alka_engine})
+  unset(_alka_engine)
+endif()
+
+check_required_components(Alka)

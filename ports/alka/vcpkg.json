@@ -1,0 +1,17 @@
+{
+  "name": "alka",
+  "version": "0.2.0",
+  "description": "Declarative C++23 <-> V8 bindings with TypeScript definitions.",
+  "homepage": "https://github.com/SingerBallad/Alka",
+  "license": "MIT",
+  "dependencies": [
+    {
+      "name": "vcpkg-cmake",
+      "host": true
+    },
+    {
+      "name": "vcpkg-cmake-config",
+      "host": true
+    }
+  ]
+}

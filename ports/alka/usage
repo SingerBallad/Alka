@@ -1,0 +1,7 @@
+Alka compiles in your project, against your V8. Name your V8 target first:
+
+  # a target carrying V8's headers, ABI definitions and libraries
+  set(ALKA_V8_TARGET MyV8)
+  set(ALKA_WITH_ENGINE ON)  # optional: Engine / ContextScope (needs libplatform)
+  find_package(Alka CONFIG REQUIRED)
+  target_link_libraries(main PRIVATE Alka::Alka)

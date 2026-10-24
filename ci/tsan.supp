@@ -1,0 +1,8 @@
+# libnode (V8) is not instrumented: races entirely inside it are V8's own
+# synchronization that TSan cannot see. Reports with any Alka frame stay.
+called_from_lib:libnode.so*
+# Isolate::TerminateExecution (thread-safe by contract) locks V8's internal
+# mutex where TSan does not see it and unlocks where it does; libnode's frames
+# do not unwind, so the report names the Alka caller.
+mutex:Alka::Watchdog::Watchdog
+mutex:Alka::EngineDetail::*nearHeapLimit

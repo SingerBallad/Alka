@@ -1,0 +1,222 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # The test suite against distributions' libnode: V8 12.4 (Ubuntu 26.04's,
+  # Node 22) and V8 13.6 (Debian sid's, Node 24 -- C++-heap classes included;
+  # sid moves daily, so its runs may fail for its own reasons). GCC, clang and
+  # the sanitizers.
+  linux:
+    name: linux / ${{ matrix.image }} / ${{ matrix.config }}
+    runs-on: ubuntu-latest
+    container: ${{ matrix.image }}
+    continue-on-error: ${{ matrix.image == 'debian:sid' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ['ubuntu:26.04', 'debian:sid']
+        config: [gcc, clang, asan, tsan]
+        include:
+          - config: gcc
+            cxx: g++
+          - config: clang
+            cxx: clang++
+          - config: asan
+            cxx: clang++
+            flags: -fsanitize=address,undefined -fno-sanitize=vptr -fno-sanitize-recover=undefined -fno-omit-frame-pointer
+          - config: tsan
+            cxx: clang++
+            flags: -fsanitize=thread -fno-omit-frame-pointer
+    steps:
+      - name: Tools and V8
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            ca-certificates curl git cmake ninja-build g++ clang libnode-dev
+      - uses: actions/checkout@v4
+      - name: Upstream V8 headers Node leaves out
+        run: |
+          tag=$(node -p 'process.versions.v8.replace(/-node\..*/, "")' 2>/dev/null || true)
+          [ -n "$tag" ] || tag=$(sed -nE 's/#define V8_(MAJOR|MINOR|BUILD|PATCH)_[A-Z]* ([0-9]+)/\2/p' /usr/include/node/v8-version.h | paste -sd.)
+          bash ci/fetch-v8-headers.sh "$tag" /usr/include/node "$RUNNER_TEMP/v8-extra"
+      - name: Configure
+        run: >
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_CXX_COMPILER=${{ matrix.cxx }}
+          "-DCMAKE_CXX_FLAGS=${{ matrix.flags }}" "-DCMAKE_EXE_LINKER_FLAGS=${{ matrix.flags }}"
+          -DALKA_V8_TARGET=LibnodeV8 -DCMAKE_PROJECT_INCLUDE=$PWD/ci/LibnodeV8.cmake
+          -DALKA_V8_EXTRA_INCLUDE=$RUNNER_TEMP/v8-extra
+      - name: Build
+        run: cmake --build build
+      - name: Test
+        env:
+          ASAN_OPTIONS: detect_leaks=0
+          UBSAN_OPTIONS: print_stacktrace=1
+          TSAN_OPTIONS: suppressions=${{ github.workspace }}/ci/tsan.supp:second_deadlock_stack=1
+        run: cd build/tests && ./AlkaTests
+
+  # Alka inside real Node releases: their own V8 (12.4, 13.6, 14.6), worker
+  # threads, the Fast API, cppgc. (GCC 15, as tested locally.)
+  node:
+    name: node ${{ matrix.node }} / linux
+    runs-on: ubuntu-latest
+    container: ubuntu:26.04
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22', '24', '26']
+    steps:
+      - name: Tools
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            ca-certificates curl git cmake ninja-build g++ xz-utils
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Node release and the V8 headers it leaves out
+        run: |
+          node_dir=$(dirname "$(dirname "$(command -v node)")")
+          echo "NODE_DIR=$node_dir" >> "$GITHUB_ENV"
+          tag=$(node -p 'process.versions.v8.replace(/-node\..*/, "")')
+          bash ci/fetch-v8-headers.sh "$tag" "$node_dir/include/node" "$RUNNER_TEMP/v8-extra"
+      - name: Build and run
+        run: |
+          cmake -S tests/Node -B build-node -G Ninja -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_CXX_COMPILER=g++ -DNODE_DIR="$NODE_DIR" \
+            -DNODE_EXTRA_INCLUDE="$RUNNER_TEMP/v8-extra"
+          cmake --build build-node
+          ctest --test-dir build-node --output-on-failure
+
+  # Alka inside Electron (its V8 15, with pointer compression and the
+  # sandbox), built as an Electron addon must be: Chromium's clang of that
+  # release, Electron's own libc++ (see ci/electron-addon.sh).
+  electron:
+    name: electron ${{ matrix.electron }} / linux
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        electron: ['45.0.0']
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tools
+        run: sudo apt-get install -y --no-install-recommends ninja-build
+      - name: Build and run
+        run: bash ci/electron-addon.sh ${{ matrix.electron }} "$RUNNER_TEMP/electron"
+
+  # The Node addons on macOS, with Apple's clang and libc++ like node itself.
+  # Experimental: it has not been run outside CI.
+  node-macos:
+    name: node ${{ matrix.node }} / macos (experimental)
+    runs-on: macos-latest
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22', '24', '26']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Tools
+        run: brew install ninja
+      - name: Node release and the V8 headers it leaves out
+        run: |
+          node_dir=$(dirname "$(dirname "$(command -v node)")")
+          echo "NODE_DIR=$node_dir" >> "$GITHUB_ENV"
+          tag=$(node -p 'process.versions.v8.replace(/-node\..*/, "")')
+          bash ci/fetch-v8-headers.sh "$tag" "$node_dir/include/node" "$RUNNER_TEMP/v8-extra"
+      - name: Build and run
+        run: |
+          cmake -S tests/Node -B build-node -G Ninja -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_CXX_COMPILER=clang++ -DNODE_DIR="$NODE_DIR" \
+            -DNODE_EXTRA_INCLUDE="$RUNNER_TEMP/v8-extra"
+          cmake --build build-node
+          ctest --test-dir build-node --output-on-failure
+
+  # MSVC against V8 13.0 from NuGet: the test suite, the benchmark, DemoHost.
+  windows:
+    name: windows / msvc ${{ matrix.config }}
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        config: [Debug, Release]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: V8 from NuGet
+        shell: pwsh
+        run: |
+          $v = '13.0.245.25'
+          foreach ($id in 'v8-v143-x64', 'v8.redist-v143-x64') {
+            Invoke-WebRequest "https://www.nuget.org/api/v2/package/$id/$v" -OutFile "$env:RUNNER_TEMP\$id.zip"
+            Expand-Archive "$env:RUNNER_TEMP\$id.zip" "$env:RUNNER_TEMP\$id"
+          }
+      - name: Configure
+        shell: pwsh
+        run: >
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=${{ matrix.config }} -DCMAKE_CXX_COMPILER=cl
+          -DALKA_V8_TARGET=NugetV8 "-DCMAKE_PROJECT_INCLUDE=$PWD/ci/NugetV8.cmake"
+          "-DALKA_V8_NUGET_DIR=$env:RUNNER_TEMP/v8-v143-x64"
+          -DALKA_V8_NUGET_CONFIG=${{ matrix.config }}
+          "-DALKA_V8_RUNTIME_DIR=$env:RUNNER_TEMP/v8.redist-v143-x64/lib/${{ matrix.config }}"
+      - name: Build
+        run: cmake --build build
+      - name: Test
+        run: cd build/tests && ./AlkaTests.exe
+
+  # The installed package: headers + sources, compiled in a consumer against
+  # its V8.
+  package:
+    runs-on: ubuntu-latest
+    container: ubuntu:26.04
+    steps:
+      - name: Tools and V8
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            ca-certificates cmake ninja-build g++ libnode-dev
+      - uses: actions/checkout@v4
+      - name: Install the package (no V8 needed)
+        run: |
+          cmake -S . -B build-package -G Ninja -DALKA_PACKAGE_ONLY=ON
+          cmake --install build-package --prefix "$RUNNER_TEMP/alka"
+      - name: A consumer
+        run: |
+          mkdir consumer
+          cat > consumer/CMakeLists.txt <<'CMAKE'
+          cmake_minimum_required(VERSION 3.28)
+          project(Consumer LANGUAGES CXX)
+          include("${ALKA_CI_DIR}/LibnodeV8.cmake")
+          set(ALKA_V8_TARGET LibnodeV8)
+          find_package(Alka 0.2 CONFIG REQUIRED)
+          add_library(consumer STATIC main.cpp)
+          target_link_libraries(consumer PRIVATE Alka::Alka)
+          CMAKE
+          cat > consumer/main.cpp <<'CPP'
+          #include <Alka/Alka.hpp>
+          struct Point { double mX = 0; };
+          struct Geo;
+          template<> struct Alka::Bind<Point> : Alka::Class<Point> {
+              static constexpr auto members = Alka::members(Alka::ctor<>(), Alka::prop<&Point::mX>());
+          };
+          template<> struct Alka::Bind<Geo> : Alka::Module<"geo"> {
+              static constexpr auto members = Alka::members(Alka::type<Point>);
+          };
+          void installGeo(v8::Local<v8::Context> context) { Alka::install<Geo>(context); }
+          CPP
+          cmake -S consumer -B consumer/build -G Ninja -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/alka" \
+            -DALKA_CI_DIR="$PWD/ci"
+          cmake --build consumer/build

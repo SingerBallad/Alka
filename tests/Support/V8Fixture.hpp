@@ -1,16 +1,20 @@
 #pragma once
 
-#include <doctest/doctest.h>
+#include <gtest/gtest.h>
 
-#include <Alka/Install.hpp>
+#include <Alka/Runtime/Dispatcher.hpp>
+#include <Alka/Runtime/Install.hpp>
 
 #include <libplatform/libplatform.h>
 #include <v8.h>
 
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <string>
 #include <string_view>
+#include <thread>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 
@@ -38,9 +42,7 @@ public:
 
     [[nodiscard]] v8::Isolate* isolate() const noexcept { return mIsolate; }
 
-    // Runs fn(isolate, context) inside isolate/handle/context scopes.
-    template<class Fn>
-    decltype(auto) run(Fn&& fn) {
+    template <class Fn> decltype(auto) run(Fn&& fn) {
         v8::Isolate::Scope isolateScope(mIsolate);
         v8::HandleScope handleScope(mIsolate);
         v8::Local<v8::Context> context = mContext.Get(mIsolate);
@@ -48,21 +50,17 @@ public:
         return std::forward<Fn>(fn)(mIsolate, context);
     }
 
-    // Runs a full GC twice so weak first+second pass callbacks fire (needs
-    // --expose-gc, set in TestMain). Defined after run(): its deduced return
-    // type must be known here (clang enforces the ordering).
     void collectGarbage() {
         run([](v8::Isolate* isolate, v8::Local<v8::Context> context) {
             for (int i = 0; i < 2; ++i) {
                 v8::Local<v8::Value> ignored;
-                (void)compileAndRun(isolate, context, "gc()").ToLocal(&ignored);
+                std::ignore = compileAndRun(isolate, context, "gc()").ToLocal(&ignored);
             }
         });
     }
 
-    static v8::MaybeLocal<v8::Value> compileAndRun(v8::Isolate* isolate,
-                                                   v8::Local<v8::Context> context,
-                                                   std::string_view source) {
+    static v8::MaybeLocal<v8::Value>
+    compileAndRun(v8::Isolate* isolate, v8::Local<v8::Context> context, std::string_view source) {
         v8::Local<v8::String> src =
             v8::String::NewFromUtf8(isolate, source.data(), v8::NewStringType::kNormal,
                                     static_cast<int>(source.size()))
@@ -77,6 +75,21 @@ public:
     std::int32_t evalInt(std::string_view source) { return evalAs<std::int32_t>(source); }
     double evalDouble(std::string_view source) { return evalAs<double>(source); }
     bool evalBool(std::string_view source) { return evalAs<bool>(source); }
+
+    template <class Pred> bool pumpUntil(Pred done) {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (std::chrono::steady_clock::now() < deadline) {
+            run([](v8::Isolate* isolate, v8::Local<v8::Context>) {
+                (void)Alka::Dispatcher(isolate).drain();
+                isolate->PerformMicrotaskCheckpoint();
+            });
+            if (done()) {
+                return true;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        return false;
+    }
 
     std::string evalString(std::string_view source) {
         return run([&](v8::Isolate* isolate, v8::Local<v8::Context> context) -> std::string {
@@ -93,8 +106,7 @@ public:
     }
 
 private:
-    template<class T>
-    T evalAs(std::string_view source) {
+    template <class T> T evalAs(std::string_view source) {
         return run([&](v8::Isolate* isolate, v8::Local<v8::Context> context) -> T {
             v8::TryCatch tryCatch(isolate);
             v8::Local<v8::Value> value;
@@ -124,12 +136,12 @@ private:
             if (tryCatch.StackTrace(context).ToLocal(&trace)) {
                 v8::String::Utf8Value traceText(isolate, trace);
                 if (*traceText) {
-                    message += "\n";
+                    message += '\n';
                     message.append(*traceText, static_cast<std::size_t>(traceText.length()));
                 }
             }
         }
-        FAIL_CHECK("JS threw while evaluating \"" << std::string(source) << "\": " << message);
+        ADD_FAILURE() << "JS threw while evaluating \"" << std::string(source) << "\": " << message;
     }
 
     std::unique_ptr<v8::ArrayBuffer::Allocator> mAllocator;
@@ -137,4 +149,4 @@ private:
     v8::Global<v8::Context> mContext;
 };
 
-}  // namespace AlkaTest
+} // namespace AlkaTest
